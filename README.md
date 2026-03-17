@@ -293,4 +293,4 @@ tmux attach -t soc
 
 ## License
 
-MIT
+[MIT](LICENSE)
