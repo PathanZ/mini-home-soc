@@ -1,4 +1,6 @@
 # Mini Home SOC — Android Network Sensor + Dashboard
+![Dashboard](screenshot.png)
+```
 
 A lightweight Security Operations Center built on a low-end Android phone running 24/7 as a home network sensor. Monitors devices, detects new connections, scans ports, and serves a responsive dashboard accessible from anywhere via Tailscale.
 
