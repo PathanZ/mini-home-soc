@@ -1,0 +1,12 @@
+# logs and runtime data
+soc/logs/
+soc/profiles/
+soc/reports/
+soc/www/
+
+# tailscale state
+tailscale-state/
+
+# temp files
+*.tgz
+*.tmp
