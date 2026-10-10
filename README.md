@@ -1,7 +1,10 @@
 # Mini Home SOC — Android Network Sensor + Dashboard
+
 ![Dashboard](screenshot.png)
 
-A lightweight Security Operations Center built on a low-end Android phone running 24/7 as a home network sensor. Monitors devices, detects new connections, scans ports, and serves a responsive dashboard accessible from anywhere via Tailscale.
+A lightweight Security Operations Center built on a repurposed Android phone running 24/7 as a home network sensor. Monitors devices, detects new connections, scans ports, and serves a responsive dashboard accessible from anywhere via Tailscale.
+
+Originally built on a ZTE Blade L210 (256MB RAM), now running on a Samsung Galaxy S10. No root required on either device.
 
 ---
 
@@ -9,7 +12,7 @@ A lightweight Security Operations Center built on a low-end Android phone runnin
 
 - Discovers all devices on the home network every 10 minutes
 - Fingerprints every new device — IP, open ports, first seen timestamp
-- Scans 7 security-critical ports across the entire network every hour
+- Scans security-critical ports across the entire network every hour
 - Alerts on new unknown devices joining the network
 - Generates hourly reports summarizing network state
 - Serves a responsive dark-theme dashboard over a zero-trust private network
@@ -29,8 +32,8 @@ Internet
        │
 ┌──────┼──────────────┐
 │      │              │
-Laptop  Main Phone   Sensor Phone (ZTE L210)
-                           │
+Laptop  Main Phone   Sensor Phone (Samsung S10)
+                      Tailscale Android app
                            │
                  ┌─────────────────┐
                  │  SOC Dashboard  │
@@ -49,12 +52,15 @@ Laptop  Main Phone   Sensor Phone (ZTE L210)
 
 ## Hardware
 
-| Device | Spec |
-|--------|------|
-| ZTE Blade L210 | ARMv7, 256MB RAM |
-| OS | Android 10 Go Edition |
-| Runtime | Termux |
-| Network | Home WiFi (wlan0) |
+| | Current | Original |
+|---|---|---|
+| Device | Samsung Galaxy S10 (SM-G973W) | ZTE Blade L210 |
+| Chip / RAM | Snapdragon 855, 8GB | ARMv7, 256MB |
+| OS | Android 12 | Android 10 Go Edition |
+| Root | No | No |
+| Runtime | Termux | Termux |
+| Remote access | Tailscale Android app | Tailscale 1.32.3 in Termux (userspace mode) |
+| Network | Home Wi-Fi (wlan0) | Home Wi-Fi (wlan0) |
 
 ---
 
@@ -63,8 +69,9 @@ Laptop  Main Phone   Sensor Phone (ZTE L210)
 - Android + Termux
 - Bash scripting
 - nmap
+- iproute2 (network range detection)
 - Python http.server
-- Tailscale (WireGuard, userspace-networking mode)
+- Tailscale (WireGuard)
 - HTML / CSS
 - tmux
 
@@ -82,7 +89,7 @@ Laptop  Main Phone   Sensor Phone (ZTE L210)
 │   ├── hourly_reporter.sh      # runs report builder loop
 │   ├── gen_dashboard.sh        # generates static HTML dashboard
 │   ├── start_dashboard.sh      # starts Python HTTP server
-│   ├── start_tailscale.sh      # starts Tailscale daemon
+│   ├── start_tailscale.sh      # legacy: Termux Tailscale for older devices
 │   └── start_soc.sh            # master launcher
 ├── logs/
 │   ├── known_devices.txt
@@ -101,102 +108,73 @@ Laptop  Main Phone   Sensor Phone (ZTE L210)
 
 ## Setup Guide
 
-### Step 1 — Install Termux
+### Step 1 — Prepare the phone
+
+- Connect to your home Wi-Fi
+- Set Termux battery usage to **Unrestricted** (Settings → Apps → Termux → Battery) so Android doesn't kill it overnight
+- If the phone stays plugged in 24/7, turn on battery protection (Samsung: Settings → Battery → Protect battery)
+
+### Step 2 — Install Termux
 
 Install Termux from F-Droid (not Play Store — the Play Store version is abandoned):
 ```
 https://f-droid.org/packages/com.termux/
 ```
 
-### Step 2 — Install packages
+### Step 3 — Install packages
 
 ```bash
 pkg update && pkg upgrade -y
-pkg install nmap python tmux curl -y
+pkg install nmap python tmux curl git iproute2 -y
 ```
 
-### Step 3 — Create folder structure
+`iproute2` is required. The monitor and scanner use `ip route` to detect your network range. Without it, scans run with an empty target and find nothing.
+
+### Step 4 — Get the scripts
 
 ```bash
-mkdir -p ~/soc/{scripts,logs,profiles,reports,www}
-mkdir -p ~/tailscale-state
-```
-
-### Step 4 — Create all scripts
-
-Create each script using nano:
-
-```bash
-nano ~/soc/scripts/device_monitor.sh
-nano ~/soc/scripts/device_profile.sh
-nano ~/soc/scripts/scan_detector.sh
-nano ~/soc/scripts/report_builder.sh
-nano ~/soc/scripts/hourly_reporter.sh
-nano ~/soc/scripts/gen_dashboard.sh
-nano ~/soc/scripts/start_dashboard.sh
-nano ~/soc/scripts/start_tailscale.sh
-nano ~/soc/scripts/start_soc.sh
-```
-
-Paste the contents of each script from the `scripts/` folder in this repository.
-
-Save each file with `Ctrl+O` then `Enter` then `Ctrl+X`.
-
-### Step 5 — Make scripts executable
-
-```bash
+mkdir -p ~/soc/{logs,profiles,reports,www}
+git clone https://github.com/PathanZ/mini-home-soc.git ~/mini-home-soc
+cp -r ~/mini-home-soc/scripts ~/soc/
 chmod +x ~/soc/scripts/*.sh
 ```
 
-### Step 6 — Install Tailscale
-
-The ZTE L210 runs kernel 4.14 which does not support TUN. Use userspace-networking mode with an older Tailscale binary:
-
+If you copy scripts from a Windows machine instead, strip Windows line endings first:
 ```bash
-cd ~
-wget https://pkgs.tailscale.com/stable/tailscale_1.32.3_arm.tgz
-tar -xzf tailscale_1.32.3_arm.tgz
-cd tailscale_1.32.3_arm
-cp tailscale tailscaled $PREFIX/bin/
-chmod +x $PREFIX/bin/tailscale $PREFIX/bin/tailscaled
+sed -i 's/\r$//' ~/soc/scripts/*.sh
 ```
 
-### Step 7 — Authenticate Tailscale
+### Step 5 — Set up Tailscale
 
-In one Termux session start the daemon:
+Install the **Tailscale** app from the Play Store, sign in, and tap Connect. No root and no Termux setup needed.
 
+Note the phone's Tailscale IP (starts with `100.`) and add it to the launcher:
 ```bash
-tailscaled --tun=userspace-networking \
-           --state=$HOME/tailscale-state/tailscaled.state \
-           --socket=$TMPDIR/tailscaled.sock
+sed -i 's/CHANGE_ME/100.x.x.x/' ~/soc/scripts/start_soc.sh
 ```
 
-In a second Termux session authenticate:
+In the Tailscale admin console, disable key expiry for the sensor so it doesn't drop off the network after 180 days.
+
+### Step 6 — Add a shortcut (optional)
 
 ```bash
-tailscale --socket=$TMPDIR/tailscaled.sock up
+echo "alias soc='bash ~/soc/scripts/start_soc.sh'" >> ~/.bashrc
+source ~/.bashrc
 ```
 
-Open the printed URL in your browser and sign in. Then confirm your Tailscale IP:
+### Step 7 — Launch everything
 
 ```bash
-tailscale --socket=$TMPDIR/tailscaled.sock ip
+soc
 ```
 
-### Step 8 — Launch everything
-
-```bash
-bash ~/soc/scripts/start_soc.sh
-```
-
-This starts 5 tmux windows:
-- `tailscale` — Tailscale daemon
+This starts 4 tmux windows:
 - `monitor` — device discovery
 - `scanner` — port scanning
 - `reporter` — hourly reports
 - `dashboard` — HTTP server on port 8080
 
-### Step 9 — Access the dashboard
+### Step 8 — Access the dashboard
 
 From any device on your Tailscale network:
 ```
@@ -208,7 +186,9 @@ On the same local network:
 http://<phone-local-ip>:8080
 ```
 
-### Step 10 — Backfill device profiles
+The first discovery scan takes a minute or two. Refresh the page after that.
+
+### Step 9 — Backfill device profiles
 
 On first run, profile all already-known devices:
 
@@ -225,12 +205,52 @@ bash ~/soc/scripts/gen_dashboard.sh
 ## After a reboot
 
 ```bash
-bash ~/soc/scripts/start_soc.sh
+soc
 ```
 
 ---
 
+## Older devices (legacy Tailscale in Termux)
+
+The original ZTE Blade L210 runs kernel 4.14, which blocks syscalls used by newer Tailscale versions, and the Tailscale app was too heavy for 256MB RAM. On devices like that, run Tailscale 1.32.3 inside Termux in userspace-networking mode:
+
+```bash
+cd ~
+wget https://pkgs.tailscale.com/stable/tailscale_1.32.3_arm.tgz
+tar -xzf tailscale_1.32.3_arm.tgz
+cd tailscale_1.32.3_arm
+cp tailscale tailscaled $PREFIX/bin/
+chmod +x $PREFIX/bin/tailscale $PREFIX/bin/tailscaled
+mkdir -p ~/tailscale-state
+
+tailscaled --tun=userspace-networking \
+           --state=$HOME/tailscale-state/tailscaled.state \
+           --socket=$TMPDIR/tailscaled.sock
+```
+
+Then in a second session:
+```bash
+tailscale --socket=$TMPDIR/tailscaled.sock up
+```
+
+`start_tailscale.sh` wraps this. Add it back as a tmux window in `start_soc.sh` if you use this route.
+
+---
+
 ## Troubleshooting
+
+**Dashboard shows 0 devices / scan log says `Failed to resolve ""`:**
+`iproute2` is missing, so the network range can't be detected.
+```bash
+pkg install iproute2 -y
+soc
+```
+
+**`soc: command not found`:**
+The current Termux window hasn't loaded the shortcut yet.
+```bash
+source ~/.bashrc
+```
 
 **Port 8080 already in use:**
 ```bash
@@ -239,11 +259,10 @@ sleep 2
 bash ~/soc/scripts/start_dashboard.sh
 ```
 
-**Tailscale socket not found:**
+**Scripts stop running after a while (Android 12+):**
+Android's phantom process killer may be stopping background processes. Disable it from a computer with adb:
 ```bash
-pkill tailscaled
-rm -f $TMPDIR/tailscaled.sock
-bash ~/soc/scripts/start_tailscale.sh
+adb shell device_config put activity_manager max_phantom_processes 2147483647
 ```
 
 **Check all tmux windows:**
@@ -259,13 +278,14 @@ tmux attach -t soc
 
 | Decision | Reason |
 |----------|--------|
-| Static HTML instead of Flask | Flask too heavy for 256MB RAM |
+| Static HTML instead of Flask | Built for 256MB RAM; still lighter on battery on the S10 |
 | Python http.server | Zero extra dependencies |
-| Tailscale 1.32.3 instead of latest | Kernel 4.14 blocks syscalls used by newer versions |
-| Userspace-networking mode | /dev/net/tun not available without root |
+| Tailscale Android app (S10) | No root needed, full TUN mode, no Termux workaround |
+| Tailscale 1.32.3 userspace (ZTE) | Kernel 4.14 blocks syscalls used by newer versions; no TUN without root |
 | bash scripts instead of Python | Minimal memory footprint |
 | No database | Flat log files sufficient, lighter on storage |
-| No auto-refresh | Manual refresh saves CPU on low-end hardware |
+| No auto-refresh | Manual refresh saves CPU |
+| No root | Locked bootloader on Canadian Snapdragon S10; project stays reproducible on stock phones |
 
 ---
 
@@ -284,10 +304,9 @@ tmux attach -t soc
 
 ## Limitations
 
-- Hostname and vendor info not available without root (kernel restricts /proc/net/arp)
-- MAC address lookup requires root access
-- Tailscale userspace-networking mode has higher latency than TUN mode
-- Device runs warm under continuous load — keep ventilated
+- Hostname, vendor and MAC address not available without root (Android restricts ARP table access)
+- Device names can be matched manually from the router's admin page
+- Phone runs warm under continuous load — keep ventilated
 
 ---
 
